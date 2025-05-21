@@ -8,6 +8,7 @@ import com.example.rabbitcom.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 
@@ -19,23 +20,40 @@ import java.util.Optional;
 public class UserService {
 
     private final RabbitTemplate rabbitTemplate;
-
     private final UserRepository userRepository;
+    private final StringRedisTemplate redisTemplate;
+
 
     @Transactional
     public UserResponse createUser(UserRequest userRequest) throws Exception {
-        Optional<User> checkUserIsExist=userRepository.findByUsername(userRequest.getName());
-        if(checkUserIsExist.isPresent()) {
-            throw  new Exception("user already exist");
+        if (userRepository.findByUsername(userRequest.getName()).isPresent()) {
+            throw new Exception("User already exists");
         }
-        else{
-            User user=User.builder()
-                    .age(userRequest.getAge())
-                    .name(userRequest.getName())
-                    .address(userRequest.getAddress())
-                    .build();
-            return new UserResponse(user.getName(),user.getAddress());
-        }
+
+        User user = User.builder()
+                .name(userRequest.getName())
+                .age(userRequest.getAge())
+                .address(userRequest.getAddress())
+                .build();
+
+        userRepository.save(user);
+
+        redisTemplate.opsForValue().set(user.getName(), user.getAddress());
+
+        return new UserResponse(user.getName(), user.getAddress());
     }
 
+    public UserResponse getUser(String name) throws Exception {
+        String addressFromRedis = redisTemplate.opsForValue().get(name);
+
+        if (addressFromRedis != null) {
+            return new UserResponse(name, addressFromRedis);
+        }
+
+        User user = userRepository.findByUsername(name)
+                .orElseThrow(() -> new Exception("User not found"));
+        redisTemplate.opsForValue().set(name, user.getAddress());
+
+        return new UserResponse(user.getName(), user.getAddress());
+    }
 }
